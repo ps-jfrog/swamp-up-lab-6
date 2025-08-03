@@ -11,7 +11,7 @@
     }
   ],
   "repo_include": [
-    "alexsh-maven-remote"
+    "lab6-pypi-remote"
   ],
   "pkg_types_include": null,
   "policy_action": "block",
