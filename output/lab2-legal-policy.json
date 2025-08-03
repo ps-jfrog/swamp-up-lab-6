@@ -1,0 +1,24 @@
+{
+  "name": "lab2-legal-policy",
+  "policy_version": "1.0",
+  "condition_id": "128",
+  "scope": "specific_repos",
+  "waivers": [],
+  "label_waivers": [
+    {
+      "justification": "Allowed Licenses",
+      "label": "allowed_legal"
+    }
+  ],
+  "repo_include": [
+    "alexsh-maven-remote"
+  ],
+  "pkg_types_include": null,
+  "policy_action": "block",
+  "notify_emails": [
+    "alexsh@jfrog.com"
+  ],
+  "waiver_request_config": "forbidden",
+  "decision_owners": null,
+  "block_from_cache": false
+}

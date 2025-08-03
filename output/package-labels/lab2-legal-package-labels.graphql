@@ -1,0 +1,4 @@
+{
+  "query": "mutation { customCatalogLabel { assignCustomCatalogLabelToPublicPackageVersions( publicPackageVersionsLabel: { publicPackageVersions: [ { publicPackage: { name: \"com.github.jnr:jffi\", type: \"maven\" }, version: \"1.3.13\" }, { publicPackage: { name: \"com.github.jnr:jnr-posix\", type: \"maven\" }, version: \"3.1.20\" } ] labelName: \"allowed_legal\" } ) } }",
+  "variables": {}
+}
