@@ -1,6 +1,6 @@
 {
   "id": "1",
-  "name": "lab2-legal-policy",
+  "name": "lab6-legal-policy",
   "risk_type": "legal",
   "condition_template_id": "AllowedLicenses",
   "param_values": [

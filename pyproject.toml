@@ -16,7 +16,7 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [[tool.poetry.source]]
-name = "lab2-pypi-remote"
-url = "https://psazuse.jfrog.io/artifactory/api/pypi/lab2-pypi-remote/simple"
+name = "lab6-pypi-remote"
+url = "https://psazuse.jfrog.io/artifactory/api/pypi/lab6-pypi-remote/simple"
 priority = "primary"
 

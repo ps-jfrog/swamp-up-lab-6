@@ -1,13 +1,13 @@
 {
-  "name": "lab2-legal-policy",
+  "name": "lab6-security-policy",
   "policy_version": "1.0",
-  "condition_id": "128",
+  "condition_id": "133",
   "scope": "specific_repos",
   "waivers": [],
   "label_waivers": [
     {
-      "justification": "Allowed Licenses",
-      "label": "allowed_legal"
+      "justification": "Allowed CVEs",
+      "label": "allowed_cves"
     }
   ],
   "repo_include": [

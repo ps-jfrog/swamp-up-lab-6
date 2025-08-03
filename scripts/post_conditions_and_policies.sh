@@ -19,6 +19,7 @@ NC='\033[0m' # No Color
 DIRECTORY="./output"
 FORCE=false
 VERBOSE=false
+DEBUG=false
 
 # Function to print colored output
 print_status() {
@@ -28,6 +29,12 @@ print_status() {
 print_verbose() {
     if [[ "$VERBOSE" == true ]]; then
         echo -e "${BLUE}[INFO]${NC} $1"
+    fi
+}
+
+print_debug() {
+    if [[ "$DEBUG" == true ]]; then
+        echo -e "${YELLOW}[DEBUG]${NC} $1" >&2
     fi
 }
 
@@ -54,6 +61,7 @@ OPTIONS:
     -d, --directory DIR    Directory containing JSON files (default: ./output)
     -f, --force           Force execution without confirmation
     -v, --verbose         Enable verbose output with API responses
+    --debug               Enable debug output for troubleshooting
     -h, --help            Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -69,6 +77,9 @@ EXAMPLES:
 
     # Force execution without confirmation
     JF_URL=https://your-instance.jfrog.io BEARER_TOKEN=your-token $0 -f
+
+    # Debug mode for troubleshooting
+    JF_URL=https://your-instance.jfrog.io BEARER_TOKEN=your-token $0 --debug
 
 EOF
 }
@@ -102,13 +113,25 @@ extract_condition_id() {
     local response="$1"
     local condition_id
     
-    # Try to extract condition ID from JSON response
-    condition_id=$(echo "$response" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+    print_debug "Extracting condition ID from response"
+    print_debug "Response length: ${#response}"
+    
+    # Try to extract condition ID from JSON response - more portable approach
+    if command -v jq >/dev/null 2>&1; then
+        print_debug "Using jq to extract condition ID"
+        condition_id=$(echo "$response" | jq -r '.id // empty')
+    else
+        print_debug "Using grep to extract condition ID"
+        # More portable grep pattern
+        condition_id=$(echo "$response" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+    fi
+    
+    print_debug "Extracted condition ID: '$condition_id'"
     
     if [[ -z "$condition_id" ]]; then
         print_error "Failed to extract condition ID from API response"
-        if [[ "$VERBOSE" == true ]]; then
-            echo "Response: $response"
+        if [[ "$VERBOSE" == true ]] || [[ "$DEBUG" == true ]]; then
+            echo "Response: $response" >&2
         fi
         return 1
     fi
@@ -122,19 +145,65 @@ update_policy_with_condition_id() {
     local condition_id="$2"
     local temp_file
     
-    temp_file=$(mktemp)
+    print_debug "Updating policy file: $policy_file with condition ID: $condition_id"
+    
+    # Create a temporary file in /tmp which should be writable
+    temp_file=$(mktemp /tmp/policy_updated_XXXXXX.json)
+    
+    # First, let's try to read the file content to debug
+    if [[ "$DEBUG" == true ]]; then
+        print_debug "Original policy file content:"
+        cat "$policy_file" >&2
+        echo >&2
+    fi
     
     # Update the condition_id field in the policy JSON
     if command -v jq >/dev/null 2>&1; then
         # Use jq if available for safer JSON manipulation
-        jq --arg condition_id "$condition_id" '.condition_id = $condition_id' "$policy_file" > "$temp_file"
+        print_debug "Using jq to update policy file"
+        print_debug "Reading from: $policy_file"
+        print_debug "Writing to: $temp_file"
+        
+        if ! cat "$policy_file" | jq --arg condition_id "$condition_id" '.condition_id = $condition_id' > "$temp_file"; then
+            print_error "Failed to update policy file with jq: $policy_file"
+            print_debug "jq error details: $?"
+            rm -f "$temp_file"
+            return 1
+        fi
+        
+        # Verify the temp file was created and has content
+        if [[ ! -s "$temp_file" ]]; then
+            print_error "Temporary file is empty after jq processing"
+            rm -f "$temp_file"
+            return 1
+        fi
+        
+        print_debug "Successfully created updated policy file with jq"
     else
         # Fallback to sed for basic replacement
-        sed "s/\"condition_id\": \"[^\"]*\"/\"condition_id\": \"$condition_id\"/" "$policy_file" > "$temp_file"
+        print_debug "Using sed to update policy file"
+        if ! sed "s/\"condition_id\": \"[^\"]*\"/\"condition_id\": \"$condition_id\"/" "$policy_file" > "$temp_file"; then
+            print_error "Failed to update policy file with sed: $policy_file"
+            rm -f "$temp_file"
+            return 1
+        fi
+        
+        # Verify the temp file was created and has content
+        if [[ ! -s "$temp_file" ]]; then
+            print_error "Temporary file is empty after sed processing"
+            rm -f "$temp_file"
+            return 1
+        fi
+        
+        print_debug "Successfully created updated policy file with sed"
     fi
     
-    mv "$temp_file" "$policy_file"
-    print_verbose "Updated policy file '$policy_file' with condition ID: $condition_id"
+
+    
+    # Update the policy_file variable to point to the temporary file
+    eval "$3=\"$temp_file\""  # Pass the new filename back to caller
+    print_verbose "Created updated policy file '$temp_file' with condition ID: $condition_id"
+    return 0
 }
 
 # Function to post condition file
@@ -146,10 +215,11 @@ post_condition() {
     local http_code
     local masked_token="***"
     
+    print_debug "Starting post_condition for file: $condition_file"
     print_verbose "Posting condition file: $condition_file" >&2
     
     # Debug: Show the curl command being executed (mask token)
-    if [[ "$VERBOSE" == true ]]; then
+    if [[ "$VERBOSE" == true ]] || [[ "$DEBUG" == true ]]; then
         print_verbose "Executing curl command:" >&2
         echo "curl -sS -w \"\\n%{http_code}\" \\" >&2
         echo "  -X POST \\" >&2
@@ -159,12 +229,15 @@ post_condition() {
         echo "  \"$JF_URL/xray/api/v1/curation/conditions\"" >&2
         echo >&2
         
-        print_verbose "Condition file contents:" >&2
-        cat "$condition_file" >&2
-        echo >&2
+        if [[ "$DEBUG" == true ]]; then
+            print_debug "Condition file contents:" >&2
+            cat "$condition_file" >&2
+            echo >&2
+        fi
     fi
     
     # Post condition to API (capture both stdout and stderr)
+    print_debug "Executing curl command..."
     response=$(curl -sS -w "\n%{http_code}" \
         -X POST \
         -H "Authorization: Bearer $BEARER_TOKEN" \
@@ -172,15 +245,28 @@ post_condition() {
         -d @"$condition_file" \
         "$JF_URL/xray/api/v1/curation/conditions" 2>&1)
     
-    # Extract HTTP status code (last line) - compatible with both Linux and macOS
+    local curl_exit_code=$?
+    print_debug "Curl exit code: $curl_exit_code"
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        print_error "Curl command failed with exit code: $curl_exit_code" >&2
+        print_error "Curl error: $response" >&2
+        set -e
+        return 1
+    fi
+    
+    # Extract HTTP status code (last line) - more portable approach
     http_code=$(echo "$response" | tail -n1)
-    # Remove HTTP status code from response - compatible with both Linux and macOS
+    # Remove HTTP status code from response - compatible with macOS
     response_body=$(echo "$response" | sed '$d')
+    
+    print_debug "HTTP Status Code: $http_code"
+    print_debug "Response body length: ${#response_body}"
     
     # Always show the response for debugging
     print_verbose "HTTP Status Code: $http_code" >&2
     print_verbose "API Response:" >&2
-    if [[ "$VERBOSE" == true ]]; then
+    if [[ "$VERBOSE" == true ]] || [[ "$DEBUG" == true ]]; then
         echo "$response_body" >&2
         echo >&2
     fi
@@ -189,9 +275,30 @@ post_condition() {
         print_success "Condition posted successfully (HTTP $http_code)" >&2
         
         # Extract condition ID
-        condition_id=$(extract_condition_id "$response_body")
-        if [[ $? -eq 0 ]]; then
+        print_debug "Extracting condition ID from successful response"
+        if [[ -z "$response_body" ]]; then
+            print_debug "Empty response body, using condition ID from file"
+            # If response body is empty, extract ID from the condition file
+            if command -v jq >/dev/null 2>&1; then
+                condition_id=$(jq -r '.id // empty' "$condition_file")
+            else
+                condition_id=$(grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$condition_file" | cut -d'"' -f4)
+            fi
+            if [[ -n "$condition_id" ]]; then
+                print_debug "Using condition ID from file: $condition_id"
+                echo "$condition_id"
+                set -e
+                return 0
+            else
+                print_error "Failed to extract condition ID from file" >&2
+                set -e
+                return 1
+            fi
+        elif condition_id=$(extract_condition_id "$response_body"); then
+            print_debug "Successfully extracted condition ID: $condition_id"
             echo "$condition_id"
+            set -e
+            return 0
         else
             print_error "Failed to extract condition ID from response" >&2
             set -e
@@ -215,10 +322,11 @@ post_policy() {
     local masked_token="***"
     local policy_name=$(basename "$policy_file")
     
+    print_debug "Starting post_policy for file: $policy_file"
     print_verbose "Posting policy file: $policy_file" >&2
     
     # Debug: Show the curl command being executed (mask token)
-    if [[ "$VERBOSE" == true ]]; then
+    if [[ "$VERBOSE" == true ]] || [[ "$DEBUG" == true ]]; then
         print_verbose "Executing curl command:" >&2
         echo "curl -sS -w \"\\n%{http_code}\" \\" >&2
         echo "  -X POST \\" >&2
@@ -228,12 +336,15 @@ post_policy() {
         echo "  \"$JF_URL/xray/api/v1/curation/policies\"" >&2
         echo >&2
         
-        print_verbose "Policy file contents:" >&2
-        cat "$policy_file" >&2
-        echo >&2
+        if [[ "$DEBUG" == true ]]; then
+            print_debug "Policy file contents:" >&2
+            cat "$policy_file" >&2
+            echo >&2
+        fi
     fi
     
     # Post policy to API (capture both stdout and stderr)
+    print_debug "Executing curl command..."
     response=$(curl -sS -w "\n%{http_code}" \
         -X POST \
         -H "Authorization: Bearer $BEARER_TOKEN" \
@@ -241,15 +352,28 @@ post_policy() {
         -d @"$policy_file" \
         "$JF_URL/xray/api/v1/curation/policies" 2>&1)
     
-    # Extract HTTP status code (last line) - compatible with both Linux and macOS
+    local curl_exit_code=$?
+    print_debug "Curl exit code: $curl_exit_code"
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        print_error "Curl command failed with exit code: $curl_exit_code" >&2
+        print_error "Curl error: $response" >&2
+        set -e
+        return 1
+    fi
+    
+    # Extract HTTP status code (last line) - more portable approach
     http_code=$(echo "$response" | tail -n1)
-    # Remove HTTP status code from response - compatible with both Linux and macOS
+    # Remove HTTP status code from response - compatible with macOS
     response_body=$(echo "$response" | sed '$d')
+    
+    print_debug "HTTP Status Code: $http_code"
+    print_debug "Response body length: ${#response_body}"
     
     # Always show the response for debugging
     print_verbose "HTTP Status Code: $http_code" >&2
     print_verbose "API Response:" >&2
-    if [[ "$VERBOSE" == true ]]; then
+    if [[ "$VERBOSE" == true ]] || [[ "$DEBUG" == true ]]; then
         echo "$response_body" >&2
         echo >&2
     fi
@@ -271,15 +395,39 @@ post_policy() {
 process_files() {
     local condition_files
     local policy_files
+    # Use indexed array instead of associative array for better compatibility
     local condition_id_map=()
     local success_count=0
     local error_count=0
     
-    # Find condition files
+    print_debug "Starting process_files function"
+    print_debug "Shell: $SHELL"
+    print_debug "Bash version: $BASH_VERSION"
+    print_debug "OS: $(uname -s)"
+    print_debug "Directory: $DIRECTORY"
+    
+    # Find condition files - compatible with older bash versions
+    print_debug "Finding condition files..."
     condition_files=($(find "$DIRECTORY" -name "*condition*.json" -type f))
     
-    # Find policy files
+    # Find policy files - compatible with older bash versions
+    print_debug "Finding policy files..."
     policy_files=($(find "$DIRECTORY" -name "*policy*.json" -type f))
+    
+    print_debug "Found ${#condition_files[@]} condition files"
+    print_debug "Found ${#policy_files[@]} policy files"
+    
+    # Debug: List all found files
+    if [[ "$DEBUG" == true ]]; then
+        echo "Condition files found:" >&2
+        for file in "${condition_files[@]}"; do
+            echo "  - $file" >&2
+        done
+        echo "Policy files found:" >&2
+        for file in "${policy_files[@]}"; do
+            echo "  - $file" >&2
+        done
+    fi
     
     if [[ ${#condition_files[@]} -eq 0 ]]; then
         print_warning "No condition files found in '$DIRECTORY'"
@@ -295,18 +443,36 @@ process_files() {
     
     # Phase 1: Post conditions and collect condition IDs
     print_status "Phase 1: Posting conditions..."
+    set +e  # Temporarily disable exit on error for debugging
     for condition_file in "${condition_files[@]}"; do
+        print_debug "Processing condition file: $condition_file"
         print_verbose "Processing condition file: $condition_file"
+        
+        local condition_id
+        print_debug "About to call post_condition for: $condition_file"
         if condition_id=$(post_condition "$condition_file"); then
-            # Store condition ID mapping (filename -> condition_id)
+            # Store condition ID mapping using indexed array with delimiter
             condition_id_map+=("$condition_file:$condition_id")
+            print_debug "Stored condition ID mapping: $condition_file -> $condition_id"
             print_verbose "Stored condition ID mapping: $condition_file -> $condition_id"
             ((success_count++))
+            print_debug "Success count incremented to: $success_count"
         else
             print_error "Failed to post condition: $condition_file"
             ((error_count++))
+            print_debug "Error count incremented to: $error_count"
         fi
+        print_debug "Finished processing condition file: $condition_file"
     done
+    set -e  # Re-enable exit on error
+    
+    print_debug "Phase 1 completed. Success: $success_count, Errors: $error_count"
+    print_debug "Condition ID map size: ${#condition_id_map[@]}"
+    print_debug "Condition ID map contents:"
+    for mapping in "${condition_id_map[@]}"; do
+        print_debug "  $mapping"
+    done
+    print_debug "About to start Phase 2"
     
     if [[ $error_count -gt 0 ]]; then
         print_warning "Phase 1 completed with $error_count errors"
@@ -319,50 +485,71 @@ process_files() {
     error_count=0
     
     for policy_file in "${policy_files[@]}"; do
+        print_debug "Processing policy file: $policy_file"
+        
         # Find corresponding condition file and get condition ID
         local condition_id=""
         local condition_file=""
         
-        # Extract base name from policy file (remove -policy.json suffix)
-        local base_name=$(basename "$policy_file" | sed 's/-policy\.json$//')
-        print_verbose "Looking for matching condition for policy: $policy_file (base name: $base_name)" >&2
+        # Extract base name from policy file - more portable approach
+        local base_name=$(basename "$policy_file")
+        base_name="${base_name%-policy.json}"
+        print_debug "Looking for matching condition for policy: $policy_file (base name: $base_name)"
         
         # Find matching condition file
         for mapping in "${condition_id_map[@]}"; do
             local cond_file="${mapping%:*}"
             local cond_id="${mapping#*:}"
-            local cond_base_name=$(basename "$cond_file" | sed 's/-condition\.json$//')
+            local cond_base_name=$(basename "$cond_file")
+            cond_base_name="${cond_base_name%-condition.json}"
             
-            print_verbose "  Checking condition: $cond_file (base name: $cond_base_name)" >&2
+            print_debug "  Checking condition: $cond_file (base name: $cond_base_name)"
             
             if [[ "$cond_base_name" == "$base_name" ]]; then
                 condition_id="$cond_id"
                 condition_file="$cond_file"
-                print_verbose "  Found matching condition: $cond_file -> condition_id: $condition_id" >&2
+                print_debug "  Found matching condition: $cond_file -> condition_id: $condition_id"
                 break
             fi
         done
         
         if [[ -z "$condition_id" ]]; then
-            print_error "No matching condition found for policy: $policy_file" >&2
-            print_error "Available condition mappings:" >&2
+            print_error "No matching condition found for policy: $policy_file"
+            print_error "Available condition mappings:"
             for mapping in "${condition_id_map[@]}"; do
                 local cond_file="${mapping%:*}"
                 local cond_id="${mapping#*:}"
-                local cond_base_name=$(basename "$cond_file" | sed 's/-condition\.json$//')
-                print_error "  $cond_base_name -> $cond_id" >&2
+                local cond_base_name=$(basename "$cond_file")
+                cond_base_name="${cond_base_name%-condition.json}"
+                print_error "  $cond_base_name -> $cond_id"
             done
             ((error_count++))
             continue
         fi
         
         # Update policy file with condition ID
-        if update_policy_with_condition_id "$policy_file" "$condition_id"; then
+        print_debug "About to update policy file: $policy_file"
+        local updated_policy_file="$policy_file"
+        if update_policy_with_condition_id "$policy_file" "$condition_id" updated_policy_file; then
+            print_debug "Successfully updated policy file: $updated_policy_file"
             # Post updated policy
-            if post_policy "$policy_file"; then
+            print_debug "About to post policy: $updated_policy_file"
+            if post_policy "$updated_policy_file"; then
+                print_debug "Successfully posted policy: $updated_policy_file"
                 ((success_count++))
+                # Clean up temporary file if it was created
+                if [[ "$updated_policy_file" != "$policy_file" ]]; then
+                    rm -f "$updated_policy_file"
+                    print_debug "Cleaned up temporary file: $updated_policy_file"
+                fi
             else
+                print_error "Failed to post policy: $updated_policy_file"
                 ((error_count++))
+                # Clean up temporary file on error
+                if [[ "$updated_policy_file" != "$policy_file" ]]; then
+                    rm -f "$updated_policy_file"
+                    print_debug "Cleaned up temporary file on error: $updated_policy_file"
+                fi
             fi
         else
             print_error "Failed to update policy file: $policy_file"
@@ -394,6 +581,10 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
+        --debug)
+            DEBUG=true
+            shift
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -412,6 +603,7 @@ main() {
     print_status "Directory: $DIRECTORY"
     print_status "JFrog URL: $JF_URL"
     print_status "Verbose: $VERBOSE"
+    print_status "Debug: $DEBUG"
     print_status "Force: $FORCE"
     
     # Validate environment and directory

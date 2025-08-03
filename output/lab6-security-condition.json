@@ -1,6 +1,6 @@
 {
   "id": "1",
-  "name": "lab2-security-policy",
+  "name": "lab6-security-policy",
   "is_custom": false,
   "risk_type": "security",
   "supported_pkg_types": [
