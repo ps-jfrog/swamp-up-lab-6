@@ -4,12 +4,7 @@
   "condition_id": "133",
   "scope": "specific_repos",
   "waivers": [],
-  "label_waivers": [
-    {
-      "justification": "Allowed CVEs",
-      "label": "allowed_cves"
-    }
-  ],
+  "label_waivers": [],
   "repo_include": [
     "lab6-pypi-remote"
   ],

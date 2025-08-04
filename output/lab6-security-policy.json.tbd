@@ -1,10 +1,15 @@
 {
-  "name": "lab6-legal-policy",
+  "name": "lab6-security-policy",
   "policy_version": "1.0",
-  "condition_id": "134",
+  "condition_id": "133",
   "scope": "specific_repos",
   "waivers": [],
-  "label_waivers": [],
+  "label_waivers": [
+    {
+      "justification": "Allowed CVEs",
+      "label": "allowed_cves"
+    }
+  ],
   "repo_include": [
     "lab6-pypi-remote"
   ],
