@@ -4,7 +4,12 @@
   "condition_id": "134",
   "scope": "specific_repos",
   "waivers": [],
-  "label_waivers": [],
+  "label_waivers": [
+    {
+      "justification": "Allowed Licenses",
+      "label": "allowed_legal"
+    }
+  ],
   "repo_include": [
     "lab6-pypi-remote"
   ],
