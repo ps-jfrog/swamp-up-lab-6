@@ -1,0 +1,24 @@
+{
+  "name": "lab6-huggingface-malicious-policy",
+  "policy_version": "1.0",
+  "condition_id": "133",
+  "scope": "specific_repos",
+  "waivers": [],
+  "label_waivers": [
+    {
+      "justification": "Allowed CVEs",
+      "label": "allowed_cves"
+    }
+  ],
+  "repo_include": [
+    "lab6-huggingface-remote"
+  ],
+  "pkg_types_include": null,
+  "policy_action": "block",
+  "notify_emails": [
+    "alexsh@jfrog.com"
+  ],
+  "waiver_request_config": "forbidden",
+  "decision_owners": null,
+  "block_from_cache": false
+}
