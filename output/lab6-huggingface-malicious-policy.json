@@ -1,5 +1,5 @@
 {
-  "name": "lab6-huggingface-malicious-policy",
+  "name": "lab6-huggingface-malicious-condition-policy",
   "policy_version": "1.0",
   "condition_id": "133",
   "scope": "specific_repos",
